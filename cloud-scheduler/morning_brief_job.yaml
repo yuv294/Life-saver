@@ -1,0 +1,24 @@
+# Deploy with:
+#   gcloud scheduler jobs create http morning-brief-all-users \
+#     --schedule="0 6 * * *" \
+#     --uri="https://YOUR-CLOUD-RUN-URL/agents/morning-brief/ALL" \
+#     --http-method=POST \
+#     --headers="X-Internal-Secret=YOUR_INTERNAL_SECRET,Content-Type=application/json" \
+#     --time-zone="UTC" \
+#     --location=YOUR_REGION
+
+name: morning-brief-all-users
+description: "Trigger morning brief agent for all active users at 6am UTC"
+schedule: "0 6 * * *"
+timeZone: UTC
+httpTarget:
+  uri: https://YOUR-CLOUD-RUN-URL/agents/morning-brief/ALL
+  httpMethod: POST
+  headers:
+    Content-Type: application/json
+    X-Internal-Secret: YOUR_INTERNAL_SECRET_HERE
+  body: ""
+retryConfig:
+  retryCount: 2
+  minBackoffDuration: 5s
+  maxBackoffDuration: 3600s

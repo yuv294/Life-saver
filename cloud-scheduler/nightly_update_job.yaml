@@ -1,0 +1,14 @@
+name: nightly-model-update
+description: "Nightly procrastination pattern refresh + chronotype update at 11pm UTC"
+schedule: "0 23 * * *"
+timeZone: UTC
+httpTarget:
+  uri: https://YOUR-CLOUD-RUN-URL/agents/update-models/ALL
+  httpMethod: POST
+  headers:
+    Content-Type: application/json
+    X-Internal-Secret: YOUR_INTERNAL_SECRET_HERE
+  body: ""
+retryConfig:
+  retryCount: 1
+  minBackoffDuration: 60s

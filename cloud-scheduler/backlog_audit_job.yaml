@@ -1,0 +1,14 @@
+name: backlog-audit-sunday
+description: "Weekly backlog Anti-List audit — every Sunday at 9am UTC"
+schedule: "0 9 * * 0"
+timeZone: UTC
+httpTarget:
+  uri: https://YOUR-CLOUD-RUN-URL/agents/backlog-audit/ALL
+  httpMethod: POST
+  headers:
+    Content-Type: application/json
+    X-Internal-Secret: YOUR_INTERNAL_SECRET_HERE
+  body: ""
+retryConfig:
+  retryCount: 1
+  minBackoffDuration: 30s

@@ -1,0 +1,24 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.env.local
+service-account*.json
+*-firebase-adminsdk-*.json
+
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+
+# Frontend
+frontend/web/node_modules/
+frontend/web/.next/
+frontend/web/out/
+frontend/web/.env*
+!frontend/web/.env.example
+
+# Misc
+.DS_Store
+*.log
