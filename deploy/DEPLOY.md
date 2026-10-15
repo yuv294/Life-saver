@@ -28,11 +28,13 @@ Note the `SERVICE` and `REGION` columns. Below, replace `MY_SERVICE` and `MY_REG
 **3. Deploy a test copy that gets no real traffic**
 
 ```bash
-gcloud run deploy MY_SERVICE --source backend --region MY_REGION --no-traffic --tag candidate
+gcloud run deploy MY_SERVICE --source backend --region MY_REGION --no-traffic --tag candidate \
+  --min-instances 0 --max-instances 2
 ```
 
 - If it asks to enable APIs, answer `y`.
 - Your existing environment variables and secrets (Gemini key, database URL, and so on) carry over automatically.
+- `--min-instances 0` lets the service switch off completely when nobody is using it, which is what keeps it inside the free tier. `--max-instances 2` stops a traffic spike from running up a bill.
 - This builds the new version but keeps your live app on the old one. Nothing breaks if the new one has a problem.
 - At the end it prints a URL that starts with `https://candidate---`. That is the test copy.
 
@@ -59,6 +61,19 @@ gcloud run services update MY_SERVICE --region MY_REGION --update-env-vars REQUI
 ```
 
 This makes the app refuse to start if it is still using the default development passwords. If your service starts fine afterwards, your secrets are real. If it won't start, set real values for `SECRET_KEY` and `INTERNAL_API_SECRET` (Cloud Run console > Edit & deploy new revision > Variables & Secrets), or undo with `--remove-env-vars REQUIRE_SECURE_SECRETS`.
+
+---
+
+## Keeping it inside the free tier
+
+Google Cloud needs a billing account linked to the project, even for free things, so you can't get to literally zero risk. What you can do is stay well inside the monthly free allowance, which does not use up your free-trial credits:
+
+- **Cloud Run:** 2 million requests, 180,000 vCPU-seconds and 360,000 GiB-seconds of memory per month are free. A student project with a handful of users uses a tiny fraction of that, as long as it scales to zero (`--min-instances 0`).
+- **Cloud Build** (the thing that builds your code when you deploy): the first 2,500 build-minutes per month are free. One build takes a few minutes.
+- **Cloud Scheduler:** the first 3 jobs per billing account are free (as far as I know; check the pricing page).
+- **Don't create a Cloud SQL database.** It is billed by the hour even when idle. A free database elsewhere (Neon, for example) avoids this.
+- **Set a budget alert** so you hear about it early: console.cloud.google.com > Billing > Budgets & alerts > Create budget, set the amount to a few rupees and keep the default alert emails. A budget only sends emails, it does not stop spending, so check your email.
+- Every few deploys, delete old container images: Artifact Registry > the repository > select old images > Delete. Storage is only free up to a small amount.
 
 ---
 
