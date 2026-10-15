@@ -73,9 +73,9 @@ Model in use: `gemini-2.5-flash` (the `gemini-2.0-flash` free tier was rate-limi
 - **Google Cloud Run** — backend hosting (FastAPI container, see `backend/Dockerfile`).
 - **Cloud Scheduler** — triggers the Morning Brief, Backlog Audit, and a nightly update job (`cloud-scheduler/*.yaml`).
 - **Firebase Auth** — Google sign-in for the frontend.
-- **Firebase Hosting** — frontend deployment target.
+- **Frontend hosting** — TODO: state where the frontend is actually served from (Firebase Hosting / Cloud Run / Vercel).
 - **Firebase Cloud Messaging (FCM)** — push notifications for nudges/briefs.
-- **Cloud SQL** — backend persistence (connected at deploy time).
+- **PostgreSQL** — async SQLAlchemy + asyncpg; TODO: state the real host (development used Neon; Cloud SQL is supported via `DATABASE_URL`).
 - **Google Calendar API** — calendar read/write for the scheduling agent (OAuth flow still pending — currently runs off task deadlines + energy curve only).
 - **Gmail API** — commitment scanning from inbox.
 
@@ -98,11 +98,57 @@ npm run dev
 
 ## Status
 
-Backend and frontend run end-to-end locally; the core loop is verified: create task → Gemini skill-tags → clusters → dashboard → complete → momentum → constellation → morning brief.
+Backend and frontend run end-to-end locally; the core loop is verified: create task -> Gemini skill-tags -> clusters -> dashboard -> complete -> momentum -> constellation -> morning brief. The backend was deployed to Google Cloud Run in June 2026 (steps for redeploying are in [`deploy/DEPLOY.md`](deploy/DEPLOY.md)). Everything also runs locally, and CI runs the tests and benchmark on every push.
 
-Remaining before submission:
-- Reschedule modal UI polish
-- Planning-accuracy hint in `CreateTaskModal`
-- Vacation-finder UI
-- Google Calendar OAuth connection
-- Deploy to Cloud Run + Firebase Hosting
+Still open: Google Calendar OAuth connection, reschedule modal polish, vacation-finder UI.
+
+## Scheduler
+
+`services/scheduler_service.py` places tasks into free energy windows with **OR-Tools CP-SAT** and falls back to an earliest-deadline-first greedy scheduler if OR-Tools is unavailable or the solve fails. It honours:
+
+- task duration (`estimated_hours`, in 30-minute slots, contiguous and free)
+- calendar events (no overlap)
+- deadlines
+- task dependencies (prerequisite must finish first; unscheduled prerequisite means the dependant is not scheduled)
+- no double-booking
+
+The objective scheduled-task count (weighted by cascade severity) dominates, then total energy of the chosen slots. `POST /schedule/optimize` returns `assignments`, `unscheduled` (with reasons), `solver` (`cp-sat` or `greedy`) and `solve_time_ms`, so the solver in use in production is observable rather than assumed.
+
+## Tests, benchmarks and measurements
+
+```
+cd backend
+pip install -r requirements-dev.txt
+pytest                                                            # unit tests (scheduler, graph, chrono, Gemini parsing, config)
+python benchmarks/scheduler_benchmark.py --n 50 --seed 7          # CP-SAT vs greedy, independent constraint validator
+python scripts/measure_deployed.py --base-url https://<service>.run.app   # latency of the deployed API
+python scripts/eval_skill_tagging.py --csv scripts/tag_eval_labels.csv    # Gemini vs keyword heuristic on 40 hand-labelled tasks
+```
+
+CI (`.github/workflows/ci.yml`) runs the tests and the benchmark, builds the Docker image and frontend, and deploys to Cloud Run on `main` once the repository variables below are set.
+
+### Results
+
+Only numbers produced by the scripts above belong here. Fill the table from the files in `benchmarks/results/` and `metrics/`.
+
+| Measurement | Value | Source |
+|---|---|---|
+| CP-SAT vs greedy: tasks scheduled (50 synthetic instances, seed 7) | _run benchmark_ | `benchmarks/results/scheduler_benchmark.md` |
+| Constraint violations across all schedules | _run benchmark_ (must be 0) | same |
+| Deployed API p50 / p95 latency | _run measure_deployed.py_ | `metrics/deployed-*.md` |
+| Solver live in production | _check `solver` field_ | `/schedule/optimize` response |
+| Skill-tagging accuracy vs keyword baseline (n = hand-labelled tasks) | _run eval_skill_tagging.py_ | `metrics/skill_tagging_eval.json` |
+
+Benchmark instances are synthetic (48h horizon, 2-5 meetings, 8-16 tasks of 0.5-3h, 75% with deadlines, ~25% with a prerequisite); they describe the generator, not real users.
+
+### Getting a token for `measure_deployed.py`
+
+Sign in to the deployed frontend, open the browser dev tools console and run `await firebase.auth().currentUser.getIdToken()` (or read the `Authorization: Bearer ...` header of any API request in the Network tab). Export it as `LIFESAVER_TOKEN`. Tokens expire after about an hour and are never written to disk by the script.
+
+## Deployment
+
+Step-by-step instructions for beginners (manual deploy and automatic deploy) are in [`deploy/DEPLOY.md`](deploy/DEPLOY.md).
+
+Backend: Cloud Run from `backend/Dockerfile` (non-root user, port 8080). Set `REQUIRE_SECURE_SECRETS=true` in production so the app refuses to start with the default `SECRET_KEY`, `INTERNAL_API_SECRET` or `DEV_AUTH_BYPASS=true`.
+
+For the CI deploy job, add these repository variables (Settings > Secrets and variables > Actions > Variables): `GCP_PROJECT_ID`, `GCP_REGION`, `CLOUD_RUN_SERVICE`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`. Authentication uses Workload Identity Federation, so no service-account key is stored in GitHub.

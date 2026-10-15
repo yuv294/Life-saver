@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Last-Minute Life Saver API…")
+    weak = settings.insecure_defaults()
+    if weak:
+        message = "Insecure configuration: " + ", ".join(weak)
+        if settings.require_secure_secrets:
+            raise RuntimeError(message)
+        logger.warning("%s — set real values (Secret Manager) before exposing this service", message)
     init_firebase()
     await create_tables()
     logger.info("Ready.")

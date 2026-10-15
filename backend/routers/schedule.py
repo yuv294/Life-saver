@@ -11,7 +11,7 @@ from models.user import User
 from models.task import Task
 from services.chrono_service import ChronoService
 from services.calendar_service import CalendarService
-from services.scheduler_service import solve_schedule
+from services.scheduler_service import solve_schedule_detailed
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
@@ -57,8 +57,14 @@ async def optimize_schedule(
         for t in tasks
     ]
 
-    assignments = solve_schedule(task_dicts, energy_windows, calendar_events)
-    return {"assignments": assignments, "task_count": len(tasks)}
+    result = solve_schedule_detailed(task_dicts, energy_windows, calendar_events)
+    return {
+        "assignments": result["assignments"],
+        "unscheduled": result["unscheduled"],
+        "solver": result["solver"],
+        "solve_time_ms": result["solve_time_ms"],
+        "task_count": len(tasks),
+    }
 
 
 @router.get("/energy-windows")

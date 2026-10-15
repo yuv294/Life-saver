@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests + scheduler benchmark
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # lets the job post the benchmark table as a PR comment
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Install dependencies (includes OR-Tools, so the CP-SAT tests really run)
+        run: |
+          set -o pipefail
+          python --version
+          pip install -r requirements-dev.txt 2>&1 | tee pip.log || {
+            echo "::error title=pip install failed::$(sed -n '/conflict is caused by/,$p' pip.log | head -n 14 | tr '\n' ' ' | cut -c1-1500)"
+            exit 1
+          }
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          pytest -ra 2>&1 | tee pytest.log || {
+            echo "::error title=pytest failed::$(grep -E '^(FAILED|ERROR)|^E ' pytest.log | head -n 12 | tr '\n' ' ' | cut -c1-1500)"
+            exit 1
+          }
+      - name: Scheduler benchmark (CP-SAT vs greedy baseline)
+        run: python benchmarks/scheduler_benchmark.py --n 50 --seed 7 --out benchmarks/results
+      - name: Publish benchmark summary
+        if: always()
+        run: |
+          if [ -f benchmarks/results/scheduler_benchmark.md ]; then
+            cat benchmarks/results/scheduler_benchmark.md >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice title=Scheduler benchmark::$(tr '\n' ' ' < benchmarks/results/scheduler_benchmark.md | cut -c1-1500)"
+          fi
+      - name: Post (or update) the benchmark table on the pull request
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          [ -f benchmarks/results/scheduler_benchmark.md ] || exit 0
+          MARK='<!-- scheduler-benchmark -->'
+          { echo "$MARK"; cat benchmarks/results/scheduler_benchmark.md; } > comment.md
+          ID=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                 --jq ".[] | select(.body | startswith(\"$MARK\")) | .id" | head -n 1)
+          if [ -n "$ID" ]; then
+            gh api "repos/$REPO/issues/comments/$ID" -X PATCH -F body=@comment.md >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F body=@comment.md >/dev/null
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scheduler-benchmark
+          path: backend/benchmarks/results/
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          load: true
+          tags: lifesaver-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: OR-Tools is present in the image and the scheduler picks CP-SAT
+        run: |
+          docker run --rm --entrypoint python lifesaver-backend:ci -c "
+          import ortools
+          from services.scheduler_service import solve_schedule_detailed
+          w = [{'start': '2026-01-05T09:00:00+00:00', 'end': '2026-01-05T09:30:00+00:00', 'energy_score': 0.9},
+               {'start': '2026-01-05T09:30:00+00:00', 'end': '2026-01-05T10:00:00+00:00', 'energy_score': 0.9}]
+          r = solve_schedule_detailed([{'id': 't1', 'estimated_hours': 0.5}], w, [])
+          assert r['solver'] == 'cp-sat', r
+          print('ortools', ortools.__version__, '| solver:', r['solver'])
+          "
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
+      - run: npm ci
+      - name: Build (dummy public env; nothing is deployed from this job)
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log || {
+            echo "::error title=next build failed::$(grep -iE 'error|failed|cannot|not found' build.log | tail -n 8 | tr '\n' ' ' | cut -c1-900)"
+            exit 1
+          }
+        env:
+          # Dummy, non-secret values: Firebase's client initialises at build time and rejects an empty key.
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+          NEXT_PUBLIC_DEV_AUTH: "true"
+          NEXT_PUBLIC_FIREBASE_API_KEY: ci-dummy-key
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci-dummy.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-dummy
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci-dummy.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "0"
+          NEXT_PUBLIC_FIREBASE_APP_ID: ci-dummy
+
+  deploy:
+    name: Deploy backend to Cloud Run
+    needs: [backend, docker]
+    # Runs only on main, and only once the repo variables below are configured.
+    # Settings > Secrets and variables > Actions > Variables:
+    #   GCP_PROJECT_ID, GCP_REGION, CLOUD_RUN_SERVICE, GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_PROJECT_ID != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Workload Identity Federation: no long-lived service-account key stored in GitHub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      # Builds with Cloud Build from backend/Dockerfile and deploys; runtime env vars and
+      # secrets already configured on the service are left untouched.
+      - name: Deploy
+        run: |
+          gcloud run deploy "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --source backend \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}"
+      - name: Smoke test /health and report which scheduler solver is live
+        run: |
+          URL=$(gcloud run services describe "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 "$URL/health"
+          echo "Deployed: $URL" >> "$GITHUB_STEP_SUMMARY"

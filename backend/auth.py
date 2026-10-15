@@ -7,6 +7,7 @@ from firebase_admin import credentials, auth as firebase_auth
 from database import get_db
 from models.user import User
 from config import settings
+import hmac
 import logging
 from typing import Optional
 
@@ -83,5 +84,5 @@ async def get_current_user(
 
 async def require_internal(x_internal_secret: Optional[str] = Header(None)) -> None:
     """Guard for Cloud Scheduler endpoints — verifies internal secret header."""
-    if x_internal_secret != settings.internal_api_secret:
+    if not x_internal_secret or not hmac.compare_digest(x_internal_secret, settings.internal_api_secret):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")

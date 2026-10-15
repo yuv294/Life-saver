@@ -8,3 +8,6 @@ __pycache__/
 venv/
 *.egg-info/
 .git/
+tests/
+benchmarks/
+scripts/

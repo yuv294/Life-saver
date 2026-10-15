@@ -271,6 +271,55 @@ def _heuristic_skills(task_title: str, task_description: str = "") -> dict:
     }
 
 
+VALID_SKILL_TAGS = ("analytical", "creative", "communicative", "administrative", "relational", "physical")
+_VALID_LEVELS = ("low", "medium", "high")
+
+
+def _strip_code_fences(raw: str) -> str:
+    """Remove a leading/trailing ``` or ```json fence (str.lstrip/rstrip strip character
+    sets, not prefixes, so they are the wrong tool for this)."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text[3:]
+        if text[:4].lower() == "json":
+            text = text[4:]
+        text = text.lstrip("\r\n")
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
+def parse_classification(raw: str) -> dict:
+    """Parse Gemini's classification JSON and coerce it to the schema the app expects.
+
+    Raises json.JSONDecodeError if the text is not JSON (caller falls back to heuristics).
+    Unknown skill tags are dropped, and the result always has at least one valid tag.
+    """
+    data = json.loads(_strip_code_fences(raw))
+    if not isinstance(data, dict):
+        raise json.JSONDecodeError("classification is not a JSON object", raw, 0)
+
+    tags = [t for t in (data.get("skill_tags") or []) if isinstance(t, str) and t.lower() in VALID_SKILL_TAGS]
+    tags = list(dict.fromkeys(t.lower() for t in tags))  # de-duplicate, keep order
+    if not tags:
+        tags = ["administrative"]
+    data["skill_tags"] = tags
+
+    primary = str(data.get("primary_skill", "")).lower()
+    data["primary_skill"] = primary if primary in VALID_SKILL_TAGS else tags[0]
+
+    for key in ("complexity", "importance", "urgency"):
+        if str(data.get(key, "")).lower() not in _VALID_LEVELS:
+            data[key] = "medium"
+        else:
+            data[key] = str(data[key]).lower()
+
+    quadrant = data.get("eisenhower_quadrant")
+    data["eisenhower_quadrant"] = quadrant if quadrant in (1, 2, 3, 4) else 2
+    data["_source"] = "gemini"
+    return data
+
+
 async def classify_skills(task_title: str, task_description: str = "") -> dict:
     prompt = f"""Analyze this task and return ONLY a JSON object.
 
@@ -293,8 +342,7 @@ Return JSON only, no markdown fences."""
 
     try:
         raw = await _generate(prompt)
-        text = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        return json.loads(text)
+        return parse_classification(raw)
     except json.JSONDecodeError:
         logger.warning("classify_skills parse failed, using heuristic")
         return _heuristic_skills(task_title, task_description)
