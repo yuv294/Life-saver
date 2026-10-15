@@ -1,5 +1,7 @@
 # Deploying the backend to Cloud Run
 
+> Note: deploying needs a Google Cloud project with billing enabled. Usage inside the free tier is still free, but Google requires a linked billing account.
+
 Two ways to do it. Start with **Option A** to get the new version live and check that it works. Set up **Option B** afterwards if you want every merge to `main` to deploy by itself.
 
 You don't need to install anything. Both options run in **Google Cloud Shell**, a terminal that opens in your browser (the `>_` button at the top right of https://console.cloud.google.com, with the project `life-saver-c2207` selected).

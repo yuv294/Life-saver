@@ -98,7 +98,7 @@ npm run dev
 
 ## Status
 
-Backend and frontend run end-to-end locally; the core loop is verified: create task -> Gemini skill-tags -> clusters -> dashboard -> complete -> momentum -> constellation -> morning brief. The backend is deployed to Cloud Run.
+Backend and frontend run end-to-end locally; the core loop is verified: create task -> Gemini skill-tags -> clusters -> dashboard -> complete -> momentum -> constellation -> morning brief. The backend was deployed to Google Cloud Run in June 2026 (steps for redeploying are in [`deploy/DEPLOY.md`](deploy/DEPLOY.md)). Everything also runs locally, and CI runs the tests and benchmark on every push.
 
 Still open: Google Calendar OAuth connection, reschedule modal polish, vacation-finder UI.
 
