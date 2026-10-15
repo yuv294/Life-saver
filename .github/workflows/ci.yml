@@ -54,14 +54,23 @@ jobs:
             cat benchmarks/results/scheduler_benchmark.md >> "$GITHUB_STEP_SUMMARY"
             echo "::notice title=Scheduler benchmark::$(tr '\n' ' ' < benchmarks/results/scheduler_benchmark.md | cut -c1-1500)"
           fi
-      - name: Comment the benchmark table on the pull request
+      - name: Post (or update) the benchmark table on the pull request
         if: always() && github.event_name == 'pull_request'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          if [ -f benchmarks/results/scheduler_benchmark.md ]; then
-            gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --body-file benchmarks/results/scheduler_benchmark.md
+          [ -f benchmarks/results/scheduler_benchmark.md ] || exit 0
+          MARK='<!-- scheduler-benchmark -->'
+          { echo "$MARK"; cat benchmarks/results/scheduler_benchmark.md; } > comment.md
+          ID=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                 --jq ".[] | select(.body | startswith(\"$MARK\")) | .id" | head -n 1)
+          if [ -n "$ID" ]; then
+            gh api "repos/$REPO/issues/comments/$ID" -X PATCH -F body=@comment.md >/dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F body=@comment.md >/dev/null
           fi
       - uses: actions/upload-artifact@v4
         if: always()
