@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system deps for asyncpg, prophet, ortools
+# System deps for asyncpg (libpq) and OR-Tools (libgomp)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
@@ -15,6 +15,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
+
+# Run as an unprivileged user
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser /app
+USER appuser
 
 # Cloud Run requires PORT env var — default 8080
 ENV PORT=8080

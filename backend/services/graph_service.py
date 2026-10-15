@@ -45,13 +45,35 @@ def build_dependency_dag(tasks: List[Task]) -> nx.DiGraph:
 
 
 def get_critical_path(G: nx.DiGraph) -> List[str]:
+    """Longest chain of dependent tasks by total estimated hours.
+
+    Durations live on the nodes, so this is a node-weighted longest path. (Passing
+    weight="estimated_hours" to nx.dag_longest_path reads *edge* attributes, finds none,
+    and silently ranks paths by number of hops instead of hours.)
+    """
     if not G.nodes:
         return []
     try:
-        return nx.dag_longest_path(G, weight="estimated_hours")
+        order = list(nx.topological_sort(G))
     except nx.NetworkXUnfeasible:
         logger.warning("Cycle detected in dependency graph — critical path unavailable")
         return []
+
+    hours = {n: float(G.nodes[n].get("estimated_hours") or 1.0) for n in order}
+    best = dict(hours)
+    previous: Dict[str, str] = {}
+    for node in order:
+        for pred in G.predecessors(node):
+            candidate = best[pred] + hours[node]
+            if candidate > best[node]:
+                best[node] = candidate
+                previous[node] = pred
+
+    end = max(order, key=lambda n: best[n])
+    path = [end]
+    while path[-1] in previous:
+        path.append(previous[path[-1]])
+    return path[::-1]
 
 
 def get_cascade_severity(G: nx.DiGraph, task_id: str) -> Dict[str, Any]:

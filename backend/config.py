@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     dev_auth_bypass: bool = False
     dev_user_email: str = "dev@lifesaver.local"
 
+    # Set REQUIRE_SECURE_SECRETS=true in production to refuse to start with default secrets.
+    require_secure_secrets: bool = False
+
+    def insecure_defaults(self) -> List[str]:
+        """Names of secrets still on their well-known development defaults."""
+        found = []
+        if self.secret_key == "dev-secret-key-change-in-production":
+            found.append("SECRET_KEY")
+        if self.internal_api_secret == "internal-secret-for-scheduler":
+            found.append("INTERNAL_API_SECRET")
+        if self.dev_auth_bypass:
+            found.append("DEV_AUTH_BYPASS (must be false in production)")
+        return found
+
     @property
     def firebase_service_account_dict(self) -> dict:
         if not self.firebase_service_account_json:
