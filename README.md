@@ -122,7 +122,7 @@ pip install -r requirements-dev.txt
 pytest                                                            # unit tests (scheduler, graph, chrono, Gemini parsing, config)
 python benchmarks/scheduler_benchmark.py --n 50 --seed 7          # CP-SAT vs greedy, independent constraint validator
 python scripts/measure_deployed.py --base-url https://<service>.run.app   # latency of the deployed API
-python scripts/eval_skill_tagging.py --csv scripts/tag_eval_template.csv  # Gemini vs keyword heuristic on hand labels
+python scripts/eval_skill_tagging.py --csv scripts/tag_eval_labels.csv    # Gemini vs keyword heuristic on 40 hand-labelled tasks
 ```
 
 CI (`.github/workflows/ci.yml`) runs the tests and the benchmark, builds the Docker image and frontend, and deploys to Cloud Run on `main` once the repository variables below are set.
